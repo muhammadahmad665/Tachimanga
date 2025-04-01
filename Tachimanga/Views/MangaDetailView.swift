@@ -3,6 +3,7 @@ import SwiftUI
 struct MangaDetailView: View {
     let mangaId: String
     @StateObject private var viewModel = MangaDetailViewModel()
+    @ObservedObject private var downloadManager = DownloadManager.shared
     
     var body: some View {
         ScrollView {
@@ -170,9 +171,13 @@ struct MangaDetailView: View {
                         .padding(.top, 8)
                         
                         ForEach(manga.chapters) { chapter in
-                            ChapterRowView(chapter: chapter)
-                                .padding(.horizontal)
-                                .padding(.vertical, 4)
+                            ChapterRowView(
+                                manga: manga,
+                                chapter: chapter,
+                                isDownloaded: downloadManager.isDownloaded(mangaID: manga.id, chapterID: chapter.id)
+                            )
+                            .padding(.horizontal)
+                            .padding(.vertical, 4)
                         }
                     }
                 }
@@ -200,7 +205,13 @@ struct MangaDetailView: View {
 }
 
 struct ChapterRowView: View {
+    let manga: Manga
     let chapter: Chapter
+    let isDownloaded: Bool
+    
+    @ObservedObject private var downloadManager = DownloadManager.shared
+    @State private var showingDownloadOptions = false
+    @State private var showDownloadingToast = false
     
     var body: some View {
         NavigationLink(destination: ChapterReaderView(chapter: chapter)) {
@@ -227,6 +238,12 @@ struct ChapterRowView: View {
                             .font(.caption)
                     }
                     
+                    if isDownloaded {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 18))
+                    }
+                    
                     Text(formatDate(chapter.dateReleased))
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -238,6 +255,28 @@ struct ChapterRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .contextMenu {
+            if isDownloaded {
+                Button(role: .destructive) {
+                    downloadManager.deleteDownload(mangaID: manga.id, chapterID: chapter.id)
+                } label: {
+                    Label("Delete Download", systemImage: "trash")
+                }
+            } else {
+                Button {
+                    downloadChapter()
+                } label: {
+                    Label("Download Chapter", systemImage: "arrow.down")
+                }
+            }
+            
+            Button {
+                // Mark as read/unread
+            } label: {
+                Label(chapter.isRead ? "Mark as Unread" : "Mark as Read", 
+                      systemImage: chapter.isRead ? "book" : "checkmark")
+            }
+        }
     }
     
     func formatDate(_ date: Date) -> String {
@@ -245,6 +284,19 @@ struct ChapterRowView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
         return formatter.string(from: date)
+    }
+    
+    func downloadChapter() {
+        // Get chapter pages
+        ServiceProvider.shared.mangaRepository.fetchChapterPages(mangaId: manga.id, chapterId: chapter.id)
+            .sink(
+                receiveCompletion: { _ in },
+                receiveValue: { urls in
+                    downloadManager.downloadChapter(manga: manga, chapter: chapter, urls: urls)
+                    showDownloadingToast = true
+                }
+            )
+            .store(in: &downloadManager.cancellables)
     }
 }
 

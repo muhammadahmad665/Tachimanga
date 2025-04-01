@@ -16,7 +16,7 @@ protocol MangaRepository {
 
 class MockMangaRepository: MangaRepository {
     private var favorites: [String] = ["sample1"]
-    private var mangaDatabase: [Manga] = Manga.samples
+    var mangaDatabase: [Manga] = Manga.samples
     private var readingHistory: [ReadingHistoryEntry] = []
     
     func fetchPopularManga() -> AnyPublisher<[Manga], Error> {

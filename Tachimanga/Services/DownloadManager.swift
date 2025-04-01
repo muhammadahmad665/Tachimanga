@@ -10,7 +10,7 @@ class DownloadManager: ObservableObject {
     
     private let fileManager: FileManager
     private let downloadsURL: URL
-    private var cancellables = Set<AnyCancellable>()
+    var cancellables = Set<AnyCancellable>()
     
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -316,7 +316,7 @@ class DownloadManager: ObservableObject {
     
     private func handleDownloadError(taskID: String, error: Error) {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self, let task = self.activeDownloads[taskID] else { return }
+            guard let self = self, var task = self.activeDownloads[taskID] else { return }
             
             if (error as NSError).code == NSURLErrorCancelled {
                 // This is a cancel operation, not an error
