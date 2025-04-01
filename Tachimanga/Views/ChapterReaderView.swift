@@ -3,6 +3,7 @@ import Combine
 
 struct ChapterReaderView: View {
     let chapter: Chapter
+    let initialPage: Int
     @StateObject private var viewModel = ChapterReaderViewModel()
     @State private var currentPage = 0
     @State private var showControls = true
@@ -17,6 +18,13 @@ struct ChapterReaderView: View {
     
     @State private var isDownloadSheetPresented = false
     @State private var showDownloadComplete = false
+    
+    // Add an initializer with default parameter
+    init(chapter: Chapter, initialPage: Int = 0) {
+        self.chapter = chapter
+        self.initialPage = initialPage
+        self._currentPage = State(initialValue: initialPage)
+    }
     
     var body: some View {
         GeometryReader { geometry in

@@ -34,16 +34,31 @@ struct ReadingHistoryView: View {
                     ForEach(viewModel.groupedHistory.keys.sorted(by: >), id: \.self) { date in
                         if let entries = viewModel.groupedHistory[date] {
                             Section(header: 
-                                Text(formatDate(date))
-                                    .font(.headline)
-                                    .padding(.horizontal)
-                                    .padding(.top, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                HStack {
+                                    Text(formatDate(date))
+                                        .font(.headline)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    
+                                    if Calendar.current.isDateInToday(date) || Calendar.current.isDateInYesterday(date) {
+                                        Button(action: {
+                                            viewModel.clearDayHistory(date: date)
+                                        }) {
+                                            Text("Clear")
+                                                .font(.caption)
+                                                .foregroundColor(.red)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal)
+                                .padding(.top, 8)
                             ) {
                                 ForEach(entries) { historyEntry in
                                     ReadingHistoryRow(
                                         entry: historyEntry,
-                                        manga: viewModel.getManga(for: historyEntry.mangaId)
+                                        manga: viewModel.getManga(for: historyEntry.mangaId),
+                                        onDelete: {
+                                            viewModel.removeHistoryEntry(entry: historyEntry)
+                                        }
                                     )
                                     .padding(.horizontal)
                                 }
@@ -56,6 +71,26 @@ struct ReadingHistoryView: View {
         }
         .background(RefreshControl(coordinator: refreshControl))
         .navigationTitle("Reading History")
+        .toolbar {
+            if !viewModel.readingHistory.isEmpty {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        viewModel.showClearAlert = true
+                    }) {
+                        Text("Clear All")
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+        }
+        .alert("Clear Reading History", isPresented: $viewModel.showClearAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear All", role: .destructive) {
+                viewModel.clearAllHistory()
+            }
+        } message: {
+            Text("This will remove all your reading history. This action cannot be undone.")
+        }
         .onAppear {
             viewModel.loadHistory()
             refreshControl.action = viewModel.loadHistory
@@ -79,6 +114,7 @@ struct ReadingHistoryView: View {
 struct ReadingHistoryRow: View {
     let entry: ReadingHistoryEntry
     let manga: Manga?
+    let onDelete: () -> Void
     
     var body: some View {
         NavigationLink(destination: destinationView) {
@@ -160,6 +196,13 @@ struct ReadingHistoryRow: View {
             .cornerRadius(10)
             .shadow(color: .gray.opacity(0.2), radius: 2, x: 0, y: 1)
         }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
     
     private var destinationView: some View {
@@ -188,6 +231,7 @@ class ReadingHistoryViewModel: ObservableObject {
     @Published var mangaCache: [String: Manga] = [:]
     @Published var isLoading = false
     @Published var groupedHistory: [Date: [ReadingHistoryEntry]] = [:]
+    @Published var showClearAlert = false
     
     private let repository: MangaRepository = MockMangaRepository()
     private var cancellables = Set<AnyCancellable>()
@@ -251,6 +295,32 @@ class ReadingHistoryViewModel: ObservableObject {
     
     func getManga(for id: String) -> Manga? {
         return mangaCache[id]
+    }
+    
+    func clearAllHistory() {
+        repository.clearReadingHistory()
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { _ in },
+                receiveValue: { [weak self] _ in
+                    self?.readingHistory = []
+                    self?.groupedHistory = [:]
+                }
+            )
+            .store(in: &cancellables)
+    }
+    
+    func clearDayHistory(date: Date) {
+        let calendar = Calendar.current
+        readingHistory.removeAll { entry in
+            calendar.isDate(entry.dateAccessed, inSameDayAs: date)
+        }
+        groupHistoryByDate()
+    }
+    
+    func removeHistoryEntry(entry: ReadingHistoryEntry) {
+        readingHistory.removeAll { $0.id == entry.id }
+        groupHistoryByDate()
     }
 }
 

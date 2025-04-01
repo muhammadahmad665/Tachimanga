@@ -108,6 +108,31 @@ class MangaDexRepository: MangaRepository {
         return MockMangaRepository().getReadingHistory()
     }
     
+    // Implement new methods
+    func markChapterAsRead(mangaId: String, chapterId: String) -> AnyPublisher<Void, Error> {
+        return MockMangaRepository().markChapterAsRead(mangaId: mangaId, chapterId: chapterId)
+    }
+    
+    func markChapterAsUnread(mangaId: String, chapterId: String) -> AnyPublisher<Void, Error> {
+        return MockMangaRepository().markChapterAsUnread(mangaId: mangaId, chapterId: chapterId)
+    }
+    
+    func getLastReadInfo(mangaId: String) -> AnyPublisher<(chapterId: String, page: Int)?, Error> {
+        return MockMangaRepository().getLastReadInfo(mangaId: mangaId)
+    }
+    
+    func getReadChapters(mangaId: String) -> AnyPublisher<[String], Error> {
+        return MockMangaRepository().getReadChapters(mangaId: mangaId)
+    }
+    
+    func clearReadingHistory() -> AnyPublisher<Void, Error> {
+        return MockMangaRepository().clearReadingHistory()
+    }
+    
+    func getRecentlyReadManga(limit: Int) -> AnyPublisher<[Manga], Error> {
+        return MockMangaRepository().getRecentlyReadManga(limit: limit)
+    }
+    
     // Helper methods for API data conversion
     private func convertToManga(_ mangaDexManga: MangaDexManga) -> Manga? {
         // Extract title (preferably in English)

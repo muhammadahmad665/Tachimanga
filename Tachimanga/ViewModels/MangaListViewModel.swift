@@ -4,6 +4,7 @@ import Combine
 class MangaListViewModel: ObservableObject {
     @Published var popularManga: [Manga] = []
     @Published var favoriteManga: [Manga] = []
+    @Published var recentlyReadManga: [Manga] = []
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
     @Published var searchResults: [Manga] = []
@@ -24,6 +25,12 @@ class MangaListViewModel: ObservableObject {
                 self?.searchManga(query: query)
             }
             .store(in: &cancellables)
+    }
+    
+    func loadData() {
+        loadPopularManga()
+        loadFavorites()
+        loadRecentlyRead()
     }
     
     func loadPopularManga() {
@@ -57,6 +64,22 @@ class MangaListViewModel: ObservableObject {
                 },
                 receiveValue: { [weak self] favorites in
                     self?.favoriteManga = favorites
+                }
+            )
+            .store(in: &cancellables)
+    }
+    
+    func loadRecentlyRead() {
+        repository.getRecentlyReadManga(limit: 10)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { [weak self] completion in
+                    if case .failure(let error) = completion {
+                        self?.errorMessage = error.localizedDescription
+                    }
+                },
+                receiveValue: { [weak self] manga in
+                    self?.recentlyReadManga = manga
                 }
             )
             .store(in: &cancellables)

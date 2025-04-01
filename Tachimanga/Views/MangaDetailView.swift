@@ -123,6 +123,43 @@ struct MangaDetailView: View {
                     }
                     .frame(height: 200)
                     
+                    // Continue Reading Button (if applicable)
+                    if viewModel.hasReadingProgress, let lastChapter = viewModel.getLastReadChapter() {
+                        VStack {
+                            NavigationLink(destination: ChapterReaderView(
+                                chapter: lastChapter,
+                                initialPage: viewModel.lastReadPage
+                            )) {
+                                HStack {
+                                    Image(systemName: "book.circle")
+                                        .font(.title3)
+                                    
+                                    VStack(alignment: .leading) {
+                                        Text("Continue Reading")
+                                            .font(.headline)
+                                        
+                                        Text("Chapter \(String(format: "%.1f", lastChapter.number))")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding()
+                                .background(Color.blue.opacity(0.1))
+                                .cornerRadius(10)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            Divider()
+                                .padding(.vertical, 8)
+                        }
+                        .padding(.horizontal)
+                    }
+                    
                     // Genres
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack {
@@ -155,7 +192,7 @@ struct MangaDetailView: View {
                     Divider()
                         .padding(.horizontal)
                     
-                    // Chapters
+                    // Chapter List Header with Reading Progress
                     VStack(alignment: .leading) {
                         HStack {
                             Text("Chapters")
@@ -163,18 +200,26 @@ struct MangaDetailView: View {
                             
                             Spacer()
                             
-                            Text("\(manga.chapters.count) chapters")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+                            if !viewModel.readChapters.isEmpty {
+                                Text("\(viewModel.readChapters.count)/\(manga.chapters.count) read")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text("\(manga.chapters.count) chapters")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                         .padding(.horizontal)
                         .padding(.top, 8)
                         
                         ForEach(manga.chapters) { chapter in
-                            ChapterRowView(
+                            EnhancedChapterRowView(
                                 manga: manga,
                                 chapter: chapter,
-                                isDownloaded: downloadManager.isDownloaded(mangaID: manga.id, chapterID: chapter.id)
+                                isDownloaded: downloadManager.isDownloaded(mangaID: manga.id, chapterID: chapter.id),
+                                onMarkRead: { viewModel.markChapterAsRead(chapterId: chapter.id) },
+                                onMarkUnread: { viewModel.markChapterAsUnread(chapterId: chapter.id) }
                             )
                             .padding(.horizontal)
                             .padding(.vertical, 4)
@@ -204,13 +249,14 @@ struct MangaDetailView: View {
     }
 }
 
-struct ChapterRowView: View {
+struct EnhancedChapterRowView: View {
     let manga: Manga
     let chapter: Chapter
     let isDownloaded: Bool
+    let onMarkRead: () -> Void
+    let onMarkUnread: () -> Void
     
     @ObservedObject private var downloadManager = DownloadManager.shared
-    @State private var showingDownloadOptions = false
     @State private var showDownloadingToast = false
     
     var body: some View {
@@ -270,11 +316,18 @@ struct ChapterRowView: View {
                 }
             }
             
-            Button {
-                // Mark as read/unread
-            } label: {
-                Label(chapter.isRead ? "Mark as Unread" : "Mark as Read", 
-                      systemImage: chapter.isRead ? "book" : "checkmark")
+            if chapter.isRead {
+                Button {
+                    onMarkUnread()
+                } label: {
+                    Label("Mark as Unread", systemImage: "book") 
+                }
+            } else {
+                Button {
+                    onMarkRead()
+                } label: {
+                    Label("Mark as Read", systemImage: "checkmark")
+                }
             }
         }
     }
