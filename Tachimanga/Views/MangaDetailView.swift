@@ -1,0 +1,255 @@
+import SwiftUI
+
+struct MangaDetailView: View {
+    let mangaId: String
+    @StateObject private var viewModel = MangaDetailViewModel()
+    
+    var body: some View {
+        ScrollView {
+            if viewModel.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 300)
+            } else if let errorMessage = viewModel.errorMessage {
+                VStack {
+                    Text("Error")
+                        .font(.headline)
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                    Button("Retry") {
+                        viewModel.loadMangaDetails(id: mangaId)
+                    }
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                }
+                .padding()
+            } else if let manga = viewModel.manga {
+                VStack(alignment: .leading) {
+                    // Cover and basic info
+                    ZStack(alignment: .bottom) {
+                        // Background header image
+                        if let url = manga.coverImageURL {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(height: 200)
+                                        .blur(radius: 8)
+                                        .clipped()
+                                        .overlay(Color.black.opacity(0.4))
+                                default:
+                                    Color.gray
+                                }
+                            }
+                        } else {
+                            Color.gray
+                        }
+                        
+                        HStack(alignment: .bottom, spacing: 16) {
+                            // Cover image
+                            if let url = manga.coverImageURL {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        Rectangle()
+                                            .foregroundColor(.gray.opacity(0.3))
+                                            .frame(width: 120, height: 180)
+                                            .overlay(ProgressView())
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 120, height: 180)
+                                    case .failure:
+                                        Rectangle()
+                                            .foregroundColor(.gray.opacity(0.3))
+                                            .frame(width: 120, height: 180)
+                                            .overlay(Image(systemName: "book.closed"))
+                                    @unknown default:
+                                        EmptyView()
+                                    }
+                                }
+                                .cornerRadius(8)
+                                .shadow(radius: 4)
+                            } else {
+                                Rectangle()
+                                    .foregroundColor(.gray.opacity(0.3))
+                                    .frame(width: 120, height: 180)
+                                    .cornerRadius(8)
+                                    .overlay(Image(systemName: "book.closed"))
+                                    .shadow(radius: 4)
+                            }
+                            
+                            // Title and metadata
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(manga.title)
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                    .lineLimit(2)
+                                
+                                Text("by \(manga.author)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.8))
+                                
+                                HStack {
+                                    Text(manga.status.rawValue)
+                                        .font(.caption)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(statusColor(manga.status))
+                                        .foregroundColor(.white)
+                                        .cornerRadius(4)
+                                    
+                                    Spacer()
+                                    
+                                    Button(action: {
+                                        viewModel.toggleFavorite()
+                                    }) {
+                                        Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
+                                            .foregroundColor(viewModel.isFavorite ? .red : .white)
+                                            .frame(width: 32, height: 32)
+                                    }
+                                }
+                                .padding(.top, 4)
+                            }
+                            .padding(.bottom, 16)
+                        }
+                        .padding(.horizontal)
+                    }
+                    .frame(height: 200)
+                    
+                    // Genres
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(manga.genres, id: \.self) { genre in
+                                Text(genre)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.gray.opacity(0.2))
+                                    .cornerRadius(20)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    .padding(.vertical)
+                    
+                    // Description
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Synopsis")
+                            .font(.headline)
+                        
+                        Text(manga.description)
+                            .font(.body)
+                            .lineLimit(nil)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
+                    
+                    Divider()
+                        .padding(.horizontal)
+                    
+                    // Chapters
+                    VStack(alignment: .leading) {
+                        HStack {
+                            Text("Chapters")
+                                .font(.headline)
+                            
+                            Spacer()
+                            
+                            Text("\(manga.chapters.count) chapters")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+                        
+                        ForEach(manga.chapters) { chapter in
+                            ChapterRowView(chapter: chapter)
+                                .padding(.horizontal)
+                                .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(viewModel.manga?.title ?? "Manga Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            viewModel.loadMangaDetails(id: mangaId)
+        }
+    }
+    
+    func statusColor(_ status: MangaStatus) -> Color {
+        switch status {
+        case .ongoing:
+            return .green
+        case .completed:
+            return .blue
+        case .hiatus:
+            return .orange
+        case .cancelled:
+            return .red
+        }
+    }
+}
+
+struct ChapterRowView: View {
+    let chapter: Chapter
+    
+    var body: some View {
+        NavigationLink(destination: ChapterReaderView(chapter: chapter)) {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Chapter \(String(format: "%.1f", chapter.number))")
+                        .font(.subheadline)
+                        .fontWeight(chapter.isRead ? .regular : .bold)
+                        .foregroundColor(chapter.isRead ? .secondary : .primary)
+                    
+                    if let title = chapter.title, !title.isEmpty {
+                        Text(title)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                HStack {
+                    if chapter.isRead {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                    }
+                    
+                    Text(formatDate(chapter.dateReleased))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(8)
+            .background(Color.gray.opacity(0.05))
+            .cornerRadius(8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+}
+
+//#Preview {
+//    NavigationView {
+//        MangaDetailView(mangaId: "sample1")
+//    }
+//}
