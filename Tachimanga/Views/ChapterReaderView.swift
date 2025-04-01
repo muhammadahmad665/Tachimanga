@@ -15,6 +15,9 @@ struct ChapterReaderView: View {
     @AppStorage("hideStatusBar") private var hideStatusBar = true
     @AppStorage("keepScreenOn") private var keepScreenOn = true
     
+    @State private var isDownloadSheetPresented = false
+    @State private var showDownloadComplete = false
+    
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -102,6 +105,25 @@ struct ChapterReaderView: View {
                 }
                 .opacity(showControls ? 1 : 0)
             }
+            
+            // Download button
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    if viewModel.isDownloaded {
+                        // Show delete confirmation
+                        isDownloadSheetPresented.toggle()
+                    } else {
+                        // Download chapter
+                        viewModel.downloadChapter()
+                        showDownloadComplete = true
+                    }
+                }) {
+                    Image(systemName: viewModel.isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                        .foregroundColor(viewModel.isDownloaded ? .green : .white)
+                }
+                .opacity(showControls ? 1 : 0)
+                .disabled(viewModel.isDownloading)
+            }
         }
         .onAppear {
             viewModel.loadChapterPages(mangaId: chapter.mangaId, chapterId: chapter.id)
@@ -123,6 +145,27 @@ struct ChapterReaderView: View {
                 keepScreenOn: $keepScreenOn,
                 zoomScale: $zoomScale
             )
+        }
+        .alert(isPresented: $isDownloadSheetPresented) {
+            Alert(
+                title: Text("Delete Downloaded Chapter?"),
+                message: Text("This chapter will be removed from your device."),
+                primaryButton: .destructive(Text("Delete")) {
+                    viewModel.deleteDownload()
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .toast(isPresenting: $showDownloadComplete, duration: 2.0) {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                Text("Added to Downloads")
+            }
+            .padding()
+            .background(Color(.systemBackground).opacity(0.9))
+            .foregroundColor(.primary)
+            .cornerRadius(10)
+            .shadow(radius: 5)
         }
     }
     
@@ -557,6 +600,8 @@ class ChapterSelectorViewModel: ObservableObject {
 class ChapterReaderViewModel: ObservableObject {
     @Published var pageUrls: [URL] = []
     @Published var isLoading: Bool = false
+    @Published var isDownloading: Bool = false
+    @Published var isDownloaded: Bool = false
     @Published var errorMessage: String? = nil
     @Published var nextChapter: Chapter? = nil
     @Published var previousChapter: Chapter? = nil
@@ -564,12 +609,29 @@ class ChapterReaderViewModel: ObservableObject {
     private let repository: MangaRepository = MockMangaRepository()
     private var cancellables = Set<AnyCancellable>()
     private var manga: Manga?
+    private var currentChapterID: String?
+    private var currentMangaID: String?
     
     func loadChapterPages(mangaId: String, chapterId: String) {
         isLoading = true
         errorMessage = nil
+        currentChapterID = chapterId
+        currentMangaID = mangaId
         
-        // Load chapter info and pages
+        // Check if chapter is downloaded
+        isDownloaded = DownloadManager.shared.isDownloaded(mangaID: mangaId, chapterID: chapterId)
+        
+        // First try to load from local storage
+        if isDownloaded, let localUrls = DownloadManager.shared.getDownloadedChapterUrls(mangaID: mangaId, chapterID: chapterId) {
+            self.pageUrls = localUrls
+            self.isLoading = false
+            
+            // Still load manga details to enable navigation
+            loadMangaDetails(mangaId: mangaId)
+            return
+        }
+        
+        // If not available locally, try to load from network
         loadMangaDetails(mangaId: mangaId)
         
         repository.fetchChapterPages(mangaId: mangaId, chapterId: chapterId)
@@ -586,6 +648,34 @@ class ChapterReaderViewModel: ObservableObject {
                 }
             )
             .store(in: &cancellables)
+    }
+    
+    func downloadChapter() {
+        guard let mangaId = currentMangaID, 
+              let chapterId = currentChapterID,
+              let manga = manga,
+              let chapter = manga.chapters.first(where: { $0.id == chapterId }) else {
+            return
+        }
+        
+        isDownloading = true
+        
+        DownloadManager.shared.downloadChapter(manga: manga, chapter: chapter, urls: pageUrls)
+        
+        // Update download status after a delay (in real app, use notification center)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.isDownloading = false
+            self?.isDownloaded = true
+        }
+    }
+    
+    func deleteDownload() {
+        guard let mangaId = currentMangaID, let chapterId = currentChapterID else {
+            return
+        }
+        
+        DownloadManager.shared.deleteDownload(mangaID: mangaId, chapterID: chapterId)
+        isDownloaded = false
     }
     
     func updateReadingProgress(mangaId: String, chapterId: String, page: Int) {
@@ -638,6 +728,41 @@ class ChapterReaderViewModel: ObservableObject {
                 previousChapter = sortedChapters[currentChapterIndex - 1]
             } else {
                 previousChapter = nil
+            }
+        }
+    }
+}
+
+// Toast view modifier for download notifications
+extension View {
+    func toast(isPresenting: Binding<Bool>, duration: TimeInterval = 2.0, content: @escaping () -> some View) -> some View {
+        self.modifier(ToastModifier(isPresenting: isPresenting, duration: duration, content: content))
+    }
+}
+
+struct ToastModifier<T: View>: ViewModifier {
+    @Binding var isPresenting: Bool
+    let duration: TimeInterval
+    let content: () -> T
+    
+    func body(content view: Content) -> some View {
+        ZStack {
+            view
+            
+            if isPresenting {
+                VStack {
+                    Spacer()
+                    self.content()
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                                withAnimation {
+                                    self.isPresenting = false
+                                }
+                            }
+                        }
+                    Spacer().frame(height: 60)
+                }
+                .transition(AnyTransition.opacity.animation(.easeInOut(duration: 0.3)))
             }
         }
     }

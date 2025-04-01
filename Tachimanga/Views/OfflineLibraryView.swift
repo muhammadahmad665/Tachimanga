@@ -245,10 +245,10 @@ class DownloadedMangaSizeViewModel {
                     
                     let dirSize = try dirContents.reduce(0) { (subResult, subUrl) in
                         let fileSize = try subUrl.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                        return subResult + Int64(fileSize)
+                        return subResult + Int(Int64(fileSize))
                     }
                     
-                    return result + dirSize
+                    return result + Int64(dirSize)
                 } else {
                     // If it's a file, add its size
                     return result + Int64(attributes.fileSize ?? 0)
