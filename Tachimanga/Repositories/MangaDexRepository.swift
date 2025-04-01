@@ -6,6 +6,14 @@ class MangaDexRepository: MangaRepository {
     private let databaseService: DatabaseService
     private var cancellables = Set<AnyCancellable>()
     
+    // Private state for source management
+    private var currentSource: MangaSource = MangaSource(id: "mangadex", name: "MangaDex", icon: "book.closed.fill")
+    private var availableSources: [MangaSource] = [
+        MangaSource(id: "mangadex", name: "MangaDex", icon: "book.closed.fill"),
+        MangaSource(id: "mock", name: "Mock Source", icon: "book.fill"),
+        MangaSource(id: "mangakakalot", name: "Mangakakalot", icon: "book.closed")
+    ]
+    
     init(apiService: APIService, databaseService: DatabaseService) {
         self.apiService = apiService
         self.databaseService = databaseService
@@ -131,6 +139,161 @@ class MangaDexRepository: MangaRepository {
     
     func getRecentlyReadManga(limit: Int) -> AnyPublisher<[Manga], Error> {
         return MockMangaRepository().getRecentlyReadManga(limit: limit)
+    }
+    
+    func fetchMangaWithFilters(
+        genres: [String]?,
+        status: [MangaStatus]?,
+        languages: [String]?,
+        sortOption: MangaSortOption,
+        page: Int,
+        itemsPerPage: Int
+    ) -> AnyPublisher<MangaPage, Error> {
+        // Create parameters dictionary with single key-value pairs first
+        var parameters: [String: Any] = [
+            "limit": itemsPerPage,
+            "offset": (page - 1) * itemsPerPage,
+            "includes[]": "cover_art",
+            "hasAvailableChapters": true
+        ]
+        
+        // Add content ratings (can have multiple values) as an array
+        let contentRatings = ["safe", "suggestive"]
+        for (index, rating) in contentRatings.enumerated() {
+            parameters["contentRating[\(index)]"] = rating
+        }
+        
+        // Add genre filter
+        if let genres = genres {
+            for (index, genre) in genres.enumerated() {
+                parameters["includedTags[\(index)]"] = genre
+            }
+        }
+        
+        // Add status filter
+        if let status = status {
+            for (index, statusValue) in status.enumerated() {
+                // Convert MangaStatus enum to MangaDex status values
+                let mangaDexStatus: String
+                switch statusValue {
+                case .ongoing:
+                    mangaDexStatus = "ongoing"
+                case .completed:
+                    mangaDexStatus = "completed"
+                case .hiatus:
+                    mangaDexStatus = "hiatus"
+                case .cancelled:
+                    mangaDexStatus = "cancelled"
+                }
+                parameters["status[\(index)]"] = mangaDexStatus
+            }
+        }
+        
+        // Add language filter
+        if let languages = languages {
+            for (index, language) in languages.enumerated() {
+                // Convert language names to MangaDex language codes
+                let languageCode = convertToLanguageCode(language)
+                parameters["originalLanguage[\(index)]"] = languageCode
+            }
+        }
+        
+        // Add sort parameter
+        switch sortOption {
+        case .alphabetical:
+            parameters["order[title]"] = "asc"
+        case .popularity:
+            parameters["order[rating]"] = "desc"
+        case .releaseDate:
+            parameters["order[year]"] = "desc"
+        case .latestUpdate:
+            parameters["order[latestUploadedChapter]"] = "desc"
+        }
+        
+        return apiService.fetch(endpoint: "/manga", parameters: parameters)
+            .map { (response: MangaDexResponse<[MangaDexManga]>) in
+                let manga = response.data.compactMap { self.convertToManga($0) }
+                
+                return MangaPage(
+                    manga: manga,
+                    currentPage: page,
+                    totalPages: Int(ceil(Double(response.total) / Double(itemsPerPage))),
+                    hasNextPage: (page * itemsPerPage) < response.total
+                )
+            }
+            .eraseToAnyPublisher()
+    }
+    
+    func getAvailableFilters() -> AnyPublisher<MangaFilterOptions, Error> {
+        // In a full implementation, we would fetch tags from the MangaDex API
+        // For now, we'll use a static list
+        
+        // Get actual genres from MangaDex
+        return apiService.fetch(endpoint: "/manga/tag", parameters: nil)
+            .compactMap { (response: MangaDexResponse<[MangaDexTag]>) -> MangaFilterOptions in
+                let genres = response.data
+                    .filter { $0.attributes.group == "genre" }
+                    .compactMap { $0.attributes.name["en"] }
+                    .sorted()
+                
+                let languages = ["English", "Japanese", "Korean", "Chinese", "French", "Spanish"]
+                
+                return MangaFilterOptions(
+                    genres: genres,
+                    status: MangaStatus.allCases,
+                    languages: languages,
+                    sortOptions: MangaSortOption.allCases
+                )
+            }
+            .eraseToAnyPublisher()
+    }
+    
+    func getAvailableSources() -> AnyPublisher<[MangaSource], Error> {
+        return Just(availableSources)
+            .setFailureType(to: Error.self)
+            .eraseToAnyPublisher()
+    }
+    
+    func switchSource(sourceId: String) -> AnyPublisher<Bool, Error> {
+        if let newSource = availableSources.first(where: { $0.id == sourceId }) {
+            currentSource = newSource
+            return Just(true)
+                .setFailureType(to: Error.self)
+                .eraseToAnyPublisher()
+        }
+        
+        return Fail(error: NSError(
+            domain: "MangaRepository", 
+            code: 404, 
+            userInfo: [NSLocalizedDescriptionKey: "Source not found"]
+        ))
+        .eraseToAnyPublisher()
+    }
+    
+    func getCurrentSource() -> AnyPublisher<MangaSource, Error> {
+        return Just(currentSource)
+            .setFailureType(to: Error.self)
+            .eraseToAnyPublisher()
+    }
+    
+    // Helper to convert human-readable language names to ISO codes
+    private func convertToLanguageCode(_ language: String) -> String {
+        switch language.lowercased() {
+        case "english":
+            return "en"
+        case "japanese":
+            return "ja"
+        case "korean":
+            return "ko"
+        case "chinese":
+            return "zh"
+        case "french":
+            return "fr"
+        case "spanish":
+            return "es"
+        default:
+            return "en"
+        }
     }
     
     // Helper methods for API data conversion

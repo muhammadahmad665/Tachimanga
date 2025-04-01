@@ -2,359 +2,255 @@ import SwiftUI
 
 struct DownloadsView: View {
     @ObservedObject private var downloadManager = DownloadManager.shared
-    @State private var showDeleteConfirmation = false
+    @State private var expandedManga: Set<String> = []
+    @State private var showDeleteAlert = false
     @State private var mangaToDelete: String? = nil
-    
-    private var activeDownloads: [DownloadTask] {
-        Array(downloadManager.activeDownloads.values)
-    }
-    
-    private var completedDownloads: [DownloadTask] {
-        Array(downloadManager.completedDownloads.values)
-            .sorted(by: { $0.id < $1.id })
-    }
-    
-    private var failedDownloads: [(DownloadTask, Error)] {
-        Array(downloadManager.failedDownloads.values)
-    }
-    
-    private var hasActiveDownloads: Bool {
-        !activeDownloads.isEmpty
-    }
+    @State private var chapterToDelete: String? = nil
     
     var body: some View {
-        List {
-            if hasActiveDownloads {
-                Section(header: Text("Active Downloads")) {
-                    ForEach(activeDownloads, id: \.id) { task in
-                        DownloadTaskRow(task: task)
-                    }
-                }
-            }
-            
-            if !failedDownloads.isEmpty {
-                Section(header: Text("Failed Downloads")) {
-                    ForEach(failedDownloads, id: \.0.id) { (task, error) in
-                        FailedDownloadRow(task: task, error: error)
-                    }
-                }
-            }
-            
-            if !completedDownloads.isEmpty {
-                Section(header: Text("Recent Downloads")) {
-                    ForEach(completedDownloads.prefix(5), id: \.id) { task in
-                        CompletedDownloadRow(task: task)
-                    }
-                    
-                    if completedDownloads.count > 5 {
-                        NavigationLink(destination: OfflineLibraryView()) {
-                            Text("View All \(completedDownloads.count) Downloads")
-                                .font(.subheadline)
-                                .foregroundColor(.blue)
-                        }
-                    }
-                }
-            }
-            
-            if !hasActiveDownloads && completedDownloads.isEmpty && failedDownloads.isEmpty {
-                Section {
-                    VStack(spacing: 16) {
-                        Image(systemName: "arrow.down.circle")
-                            .font(.system(size: 50))
-                            .foregroundColor(.secondary)
-                            .padding()
-                        
-                        Text("No Downloads")
-                            .font(.headline)
-                        
-                        Text("Download chapters to read offline when you don't have an internet connection.")
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal)
-                        
-                        NavigationLink(destination: BrowseView()) {
-                            Text("Browse Manga")
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 10)
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                        }
-                        .padding(.top, 8)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
+        Group {
+            if downloadManager.downloadedItems.isEmpty {
+                emptyDownloadsView
+            } else {
+                downloadsList
             }
         }
-        .listStyle(InsetGroupedListStyle())
         .navigationTitle("Downloads")
-        .toolbar {
-            if hasActiveDownloads {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        // Cancel all downloads
-                        for task in activeDownloads {
-                            downloadManager.cancelDownload(mangaID: task.mangaID, chapterID: task.chapterID)
-                        }
-                    }) {
-                        Text("Cancel All")
-                    }
-                }
+    }
+    
+    private var emptyDownloadsView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "arrow.down.circle")
+                .font(.system(size: 60))
+                .foregroundColor(.secondary)
+                .padding()
+            
+            Text("No Downloaded Manga")
+                .font(.title2)
+                .fontWeight(.medium)
+            
+            Text("Downloaded chapters will appear here for offline reading")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+                .padding(.horizontal)
+            
+            NavigationLink(destination: BrowseView()) {
+                Text("Browse Manga")
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
             }
         }
-        .alert(isPresented: $showDeleteConfirmation) {
+        .padding()
+    }
+    
+    private var downloadsList: some View {
+        List {
+            ForEach(Array(downloadManager.downloadedItems.keys.sorted()), id: \.self) { mangaId in
+                MangaDownloadsSection(
+                    mangaId: mangaId,
+                    isExpanded: expandedManga.contains(mangaId),
+                    onToggle: { toggleMangaExpansion(mangaId) },
+                    onDeleteChapter: { chapterId in
+                        mangaToDelete = mangaId
+                        chapterToDelete = chapterId
+                        showDeleteAlert = true
+                    }
+                )
+            }
+        }
+        .alert(isPresented: $showDeleteAlert) {
             Alert(
-                title: Text("Delete Download?"),
-                message: Text("This will permanently delete the downloaded chapter. You can download it again later."),
+                title: Text("Delete Download"),
+                message: Text("Are you sure you want to delete this downloaded chapter? It will no longer be available offline."),
                 primaryButton: .destructive(Text("Delete")) {
-                    if let mangaID = mangaToDelete {
-                        // Split the mangaID which contains both mangaID and chapterID
-                        let components = mangaID.components(separatedBy: "_")
-                        if components.count == 2 {
-                            downloadManager.deleteDownload(mangaID: components[0], chapterID: components[1])
-                        }
-                        mangaToDelete = nil
+                    if let mangaId = mangaToDelete, let chapterId = chapterToDelete {
+                        downloadManager.deleteDownload(mangaID: mangaId, chapterID: chapterId)
                     }
-                },
-                secondaryButton: .cancel {
-                    mangaToDelete = nil
-                }
-            )
-        }
-    }
-}
-
-struct DownloadTaskRow: View {
-    @ObservedObject private var downloadManager = DownloadManager.shared
-    let task: DownloadTask
-    
-    var body: some View {
-        VStack(alignment: .leading) {
-            HStack {
-                Text("Chapter \(getChapterNumber(task: task))")
-                    .fontWeight(.medium)
-                
-                Spacer()
-                
-                Text("\(Int(task.progress * 100))%")
-                    .font(.callout)
-                    .foregroundColor(.secondary)
-            }
-            
-            ProgressView(value: task.progress)
-                .progressViewStyle(LinearProgressViewStyle())
-                .padding(.vertical, 4)
-            
-            HStack {
-                Text("\(task.downloadedPages)/\(task.totalPages) pages")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                switch task.status {
-                case .downloading:
-                    Button(action: {
-                        downloadManager.pauseDownload(mangaID: task.mangaID, chapterID: task.chapterID)
-                    }) {
-                        Image(systemName: "pause.circle")
-                            .foregroundColor(.blue)
-                    }
-                    
-                    Button(action: {
-                        downloadManager.cancelDownload(mangaID: task.mangaID, chapterID: task.chapterID)
-                    }) {
-                        Image(systemName: "xmark.circle")
-                            .foregroundColor(.red)
-                    }
-                    .padding(.leading, 8)
-                    
-                case .paused:
-                    Button(action: {
-                        downloadManager.resumeDownload(mangaID: task.mangaID, chapterID: task.chapterID)
-                    }) {
-                        Image(systemName: "play.circle")
-                            .foregroundColor(.green)
-                    }
-                    
-                    Button(action: {
-                        downloadManager.cancelDownload(mangaID: task.mangaID, chapterID: task.chapterID)
-                    }) {
-                        Image(systemName: "xmark.circle")
-                            .foregroundColor(.red)
-                    }
-                    .padding(.leading, 8)
-                    
-                case .queued:
-                    HStack {
-                        Image(systemName: "hourglass")
-                        Text("Queued")
-                    }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    
-                default:
-                    EmptyView()
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-    
-    private func getChapterNumber(task: DownloadTask) -> String {
-        // Try to find chapter in the repository
-        if let manga = ServiceProvider.shared.mangaRepository as? MockMangaRepository,
-           let mangaData = manga.mangaDatabase.first(where: { $0.id == task.mangaID }),
-           let chapter = mangaData.chapters.first(where: { $0.id == task.chapterID }) {
-            return String(format: "%.1f", chapter.number)
-        }
-        
-        // If not found, use the task ID
-        return task.id
-    }
-}
-
-struct CompletedDownloadRow: View {
-    let task: DownloadTask
-    @State private var showDeleteConfirmation = false
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text("Chapter \(getChapterNumber(task: task))")
-                    .fontWeight(.medium)
-                
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Downloaded")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            Button(action: {
-                showDeleteConfirmation = true
-            }) {
-                Image(systemName: "trash")
-                    .foregroundColor(.red)
-            }
-        }
-        .padding(.vertical, 4)
-        .alert(isPresented: $showDeleteConfirmation) {
-            Alert(
-                title: Text("Delete Download?"),
-                message: Text("This will permanently delete the downloaded chapter."),
-                primaryButton: .destructive(Text("Delete")) {
-                    DownloadManager.shared.deleteDownload(mangaID: task.mangaID, chapterID: task.chapterID)
                 },
                 secondaryButton: .cancel()
             )
         }
     }
     
-    private func getChapterNumber(task: DownloadTask) -> String {
-        // Try to find chapter in the repository
-        if let manga = ServiceProvider.shared.mangaRepository as? MockMangaRepository,
-           let mangaData = manga.mangaDatabase.first(where: { $0.id == task.mangaID }),
-           let chapter = mangaData.chapters.first(where: { $0.id == task.chapterID }) {
-            return String(format: "%.1f", chapter.number)
+    private func toggleMangaExpansion(_ mangaId: String) {
+        if expandedManga.contains(mangaId) {
+            expandedManga.remove(mangaId)
+        } else {
+            expandedManga.insert(mangaId)
         }
-        
-        // If not found, use the task ID
-        return task.id
     }
 }
 
-struct FailedDownloadRow: View {
-    @ObservedObject private var downloadManager = DownloadManager.shared
-    let task: DownloadTask
-    let error: Error
+struct MangaDownloadsSection: View {
+    let mangaId: String
+    let isExpanded: Bool
+    let onToggle: () -> Void
+    let onDeleteChapter: (String) -> Void
+    
+    @State private var manga: Manga?
+    @State private var isLoading = false
     
     var body: some View {
-        VStack(alignment: .leading) {
-            HStack {
-                Text("Chapter \(getChapterNumber(task: task))")
-                    .fontWeight(.medium)
-                
-                Spacer()
-                
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundColor(.red)
-            }
-            
-            Text("Error: \(error.localizedDescription)")
-                .font(.caption)
-                .foregroundColor(.red)
-                .lineLimit(2)
-                .padding(.vertical, 4)
-            
-            HStack {
-                Button(action: {
-                    // Try again - create a new download task
-                    if let manga = ServiceProvider.shared.mangaRepository as? MockMangaRepository,
-                       let mangaData = manga.mangaDatabase.first(where: { $0.id == task.mangaID }),
-                       let chapter = mangaData.chapters.first(where: { $0.id == task.chapterID }) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Manga header
+            Button(action: onToggle) {
+                HStack {
+                    if let manga = manga {
+                        AsyncImage(url: manga.coverImageURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 50, height: 70)
+                                    .cornerRadius(4)
+                            default:
+                                Rectangle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .frame(width: 50, height: 70)
+                                    .cornerRadius(4)
+                            }
+                        }
                         
-                        // Get the URLs for this chapter
-                        ServiceProvider.shared.mangaRepository.fetchChapterPages(mangaId: task.mangaID, chapterId: task.chapterID)
-                            .sink(
-                                receiveCompletion: { _ in },
-                                receiveValue: { urls in
-                                    // Clean up the failed download
-                                    downloadManager.failedDownloads.removeValue(forKey: task.id)
-                                    
-                                    // Start a new download
-                                    downloadManager.downloadChapter(
-                                        manga: mangaData,
-                                        chapter: chapter,
-                                        urls: urls
-                                    )
-                                }
-                            )
-                            .store(in: &downloadManager.cancellables)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(manga.title)
+                                .font(.headline)
+                            
+                            if let chapters = DownloadManager.shared.downloadedItems[mangaId] {
+                                Text("\(chapters.count) downloaded")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    } else if isLoading {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 50, height: 70)
+                            .cornerRadius(4)
+                        
+                        ProgressView()
+                            .padding(.horizontal)
+                    } else {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 50, height: 70)
+                            .cornerRadius(4)
+                        
+                        Text("Unknown Manga")
+                            .font(.headline)
                     }
-                }) {
-                    Text("Try Again")
-                        .font(.subheadline)
-                        .foregroundColor(.blue)
-                }
-                
-                Spacer()
-                
-                Button(action: {
-                    // Remove from failed list
-                    downloadManager.failedDownloads.removeValue(forKey: task.id)
-                }) {
-                    Text("Dismiss")
-                        .font(.subheadline)
+                    
+                    Spacer()
+                    
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .foregroundColor(.secondary)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            // Chapter list (if expanded)
+            if isExpanded, let chapters = DownloadManager.shared.downloadedItems[mangaId], !chapters.isEmpty {
+                ForEach(chapters.sorted(), id: \.self) { chapterId in
+                    ChapterDownloadRow(
+                        mangaId: mangaId,
+                        chapterId: chapterId,
+                        manga: manga,
+                        onDelete: { onDeleteChapter(chapterId) }
+                    )
+                }
+                .padding(.leading)
             }
         }
-        .padding(.vertical, 4)
+        .onAppear {
+            loadMangaDetails()
+        }
     }
     
-    private func getChapterNumber(task: DownloadTask) -> String {
-        // Try to find chapter in the repository
-        if let manga = ServiceProvider.shared.mangaRepository as? MockMangaRepository,
-           let mangaData = manga.mangaDatabase.first(where: { $0.id == task.mangaID }),
-           let chapter = mangaData.chapters.first(where: { $0.id == task.chapterID }) {
-            return String(format: "%.1f", chapter.number)
-        }
+    private func loadMangaDetails() {
+        isLoading = true
         
-        // If not found, use the task ID
-        return task.id
+        ServiceProvider.shared.mangaRepository.fetchMangaDetails(id: mangaId)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { _ in
+                    isLoading = false
+                },
+                receiveValue: { loadedManga in
+                    manga = loadedManga
+                    isLoading = false
+                }
+            )
+            .store(in: &DownloadManager.shared.cancellables)
     }
 }
 
-#Preview {
-    NavigationView {
-        DownloadsView()
+struct ChapterDownloadRow: View {
+    let mangaId: String
+    let chapterId: String
+    let manga: Manga?
+    let onDelete: () -> Void
+    
+    var chapter: Chapter? {
+        manga?.chapters.first(where: { $0.id == chapterId })
+    }
+    
+    var body: some View {
+        NavigationLink(destination: ChapterReaderView(chapter: chapter ?? createTemporaryChapter())) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let chapter = chapter {
+                        Text("Chapter \(String(format: "%.1f", chapter.number))")
+                            .fontWeight(.medium)
+                        
+                        if let title = chapter.title {
+                            Text(title)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        Text(chapterId.replacingOccurrences(of: "_", with: " ").capitalized)
+                            .fontWeight(.medium)
+                    }
+                }
+                
+                Spacer()
+                
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundColor(.green)
+            }
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+    }
+    
+    // Create a temporary chapter object when the real chapter data isn't available
+    private func createTemporaryChapter() -> Chapter {
+        return Chapter(
+            id: chapterId,
+            mangaId: mangaId,
+            number: 0,
+            title: "Unknown Chapter",
+            dateReleased: Date(),
+            pageCount: 0,
+            isRead: false,
+            pageUrls: nil
+        )
+    }
+}
+
+struct DownloadsView_Previews: PreviewProvider {
+    static var previews: some View {
+        NavigationView {
+            DownloadsView()
+        }
     }
 }

@@ -1,64 +1,85 @@
 import SwiftUI
 
 struct OfflineLibraryView: View {
-    @StateObject private var viewModel = OfflineLibraryViewModel()
+    @ObservedObject private var downloadManager = DownloadManager.shared
+    @State private var availableManga: [Manga] = []
+    @State private var isLoading = true
     
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, minHeight: 200)
-                } else if viewModel.downloadedManga.isEmpty {
-                    emptyStateView
-                } else {
-                    downloadsListView
+        Group {
+            if isLoading {
+                ProgressView("Loading offline library...")
+            } else if availableManga.isEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 60))
+                        .foregroundColor(.secondary)
+                        .padding()
+                    
+                    Text("No Offline Content Available")
+                        .font(.title2)
+                        .fontWeight(.medium)
+                    
+                    Text("You're offline and don't have any downloaded manga. Connect to the internet to browse and download manga for offline reading.")
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                }
+                .padding()
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 16) {
+                        ForEach(availableManga) { manga in
+                            NavigationLink(destination: MangaDetailView(mangaId: manga.id)) {
+                                MangaGridItem(manga: manga)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding()
                 }
             }
-            .padding()
         }
-        .navigationTitle("Downloaded Manga")
+        .navigationTitle("Offline Library")
         .onAppear {
-            viewModel.loadDownloadedManga()
-        }
-        .refreshable {
-            viewModel.loadDownloadedManga()
+            loadOfflineAvailableManga()
         }
     }
     
-    private var emptyStateView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 60))
-                .foregroundColor(.secondary)
-                .padding()
-            
-            Text("No Downloaded Manga")
-                .font(.title2)
-                .fontWeight(.medium)
-            
-            Text("Download manga chapters to read offline")
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-            
-            NavigationLink(destination: BrowseView()) {
-                Text("Browse Manga")
-                    .foregroundColor(.white)
-                    .padding()
-                    .background(Color.blue)
-                    .cornerRadius(8)
-            }
-            .padding(.top, 8)
+    private func loadOfflineAvailableManga() {
+        isLoading = true
+        availableManga = []
+        
+        // Get manga IDs that have downloaded chapters
+        let mangaIds = Array(downloadManager.downloadedItems.keys)
+        guard !mangaIds.isEmpty else {
+            isLoading = false
+            return
         }
-        .frame(maxWidth: .infinity, minHeight: 300)
-        .padding()
-    }
-    
-    private var downloadsListView: some View {
-        ForEach(viewModel.downloadedManga, id: \.id) { manga in
-            NavigationLink(destination: DownloadedMangaDetailView(manga: manga)) {
-                DownloadedMangaRow(manga: manga)
-            }
+        
+        // Load each manga's details
+        let repository = ServiceProvider.shared.mangaRepository
+        
+        var loadedManga: [Manga] = []
+        var loadCount = 0
+        let totalCount = mangaIds.count
+        
+        for mangaId in mangaIds {
+            repository.fetchMangaDetails(id: mangaId)
+                .receive(on: DispatchQueue.main)
+                .sink(
+                    receiveCompletion: { _ in
+                        loadCount += 1
+                        if loadCount == totalCount {
+                            availableManga = loadedManga.sorted { $0.title < $1.title }
+                            isLoading = false
+                        }
+                    },
+                    receiveValue: { manga in
+                        loadedManga.append(manga)
+                    }
+                )
+                .store(in: &downloadManager.cancellables)
         }
     }
 }

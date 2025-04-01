@@ -4,10 +4,10 @@ struct Manga: Identifiable, Codable, Equatable {
     let id: String
     let title: String
     let coverImageURL: URL?
-    let author: String
-    let description: String
-    let genres: [String]
-    let status: MangaStatus
+    var author: String
+    var description: String
+    var genres: [String]
+    var status: MangaStatus
     var chapters: [Chapter]
     var isFavorite: Bool = false
     var lastReadChapter: String? = nil
@@ -59,7 +59,8 @@ struct Manga: Identifiable, Codable, Equatable {
     }
 }
 
-enum MangaStatus: String, Codable {
+// Make MangaStatus conform to CaseIterable directly in the same file
+enum MangaStatus: String, Codable, CaseIterable {
     case ongoing = "Ongoing"
     case completed = "Completed"
     case hiatus = "Hiatus"

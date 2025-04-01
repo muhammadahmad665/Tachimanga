@@ -19,6 +19,28 @@ protocol MangaRepository {
     func getReadChapters(mangaId: String) -> AnyPublisher<[String], Error>
     func clearReadingHistory() -> AnyPublisher<Void, Error>
     func getRecentlyReadManga(limit: Int) -> AnyPublisher<[Manga], Error>
+    
+    // Enhanced filtering capabilities
+    func fetchMangaWithFilters(
+        genres: [String]?, 
+        status: [MangaStatus]?, 
+        languages: [String]?,
+        sortOption: MangaSortOption,
+        page: Int,
+        itemsPerPage: Int
+    ) -> AnyPublisher<MangaPage, Error>
+    
+    // Get available filter options for current source
+    func getAvailableFilters() -> AnyPublisher<MangaFilterOptions, Error>
+    
+    // Get list of available sources
+    func getAvailableSources() -> AnyPublisher<[MangaSource], Error>
+    
+    // Change current source
+    func switchSource(sourceId: String) -> AnyPublisher<Bool, Error>
+    
+    // Get current source
+    func getCurrentSource() -> AnyPublisher<MangaSource, Error>
 }
 
 class MockMangaRepository: MangaRepository {
@@ -26,6 +48,15 @@ class MockMangaRepository: MangaRepository {
     var mangaDatabase: [Manga] = Manga.samples
     private var readingHistory: [ReadingHistoryEntry] = []
     private var readChapters: [String: [String]] = [:] // [mangaId: [chapterId]] mapping
+    
+    // Mock manga data with additional metadata for filtering
+    private let mockLanguages = ["English", "Japanese", "Korean", "Chinese"]
+    private var currentSource: MangaSource = MangaSource(id: "mock", name: "Mock Source", icon: "book.fill")
+    private var availableSources: [MangaSource] = [
+        MangaSource(id: "mock", name: "Mock Source", icon: "book.fill"),
+        MangaSource(id: "mangadex", name: "MangaDex", icon: "book.closed.fill"),
+        MangaSource(id: "mangakakalot", name: "Mangakakalot", icon: "book.closed")
+    ]
     
     func fetchPopularManga() -> AnyPublisher<[Manga], Error> {
         Just(mangaDatabase)
@@ -288,5 +319,150 @@ class MockMangaRepository: MangaRepository {
         return Just(recentManga)
             .setFailureType(to: Error.self)
             .eraseToAnyPublisher()
+    }
+    
+    // Enhanced filtering implementation
+    func fetchMangaWithFilters(
+        genres: [String]?, 
+        status: [MangaStatus]?, 
+        languages: [String]?,
+        sortOption: MangaSortOption,
+        page: Int,
+        itemsPerPage: Int
+    ) -> AnyPublisher<MangaPage, Error> {
+        var filteredManga = mangaDatabase
+        
+        // Apply genre filter
+        if let genres = genres, !genres.isEmpty {
+            filteredManga = filteredManga.filter { manga in
+                !Set(manga.genres).isDisjoint(with: Set(genres))
+            }
+        }
+        
+        // Apply status filter
+        if let status = status, !status.isEmpty {
+            filteredManga = filteredManga.filter { manga in
+                status.contains(manga.status)
+            }
+        }
+        
+        // Apply language filter (using mock language data)
+        if let languages = languages, !languages.isEmpty {
+            filteredManga = filteredManga.filter { _ in
+                // In a real implementation, this would filter by language
+                // For now, we'll use a simplified approach that keeps most manga for demo
+                return Bool.random()
+            }
+        }
+        
+        // Apply sorting
+        switch sortOption {
+        case .alphabetical:
+            filteredManga.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        case .popularity:
+            // Random sorting for mock data - would be based on real ratings in production
+            filteredManga.shuffle()
+        case .releaseDate:
+            filteredManga.sort { $0.dateAdded > $1.dateAdded }
+        case .latestUpdate:
+            // Sort by most recently updated chapters
+            filteredManga.sort { manga1, manga2 in
+                let latestUpdate1 = manga1.chapters.max { $0.dateReleased < $1.dateReleased }?.dateReleased ?? Date.distantPast
+                let latestUpdate2 = manga2.chapters.max { $0.dateReleased < $1.dateReleased }?.dateReleased ?? Date.distantPast
+                return latestUpdate1 > latestUpdate2
+            }
+        }
+        
+        // Pagination
+        let startIndex = (page - 1) * itemsPerPage
+        let endIndex = min(startIndex + itemsPerPage, filteredManga.count)
+        
+        let paginatedManga = startIndex < filteredManga.count ? 
+            Array(filteredManga[startIndex..<endIndex]) : []
+        
+        let mangaPage = MangaPage(
+            manga: paginatedManga,
+            currentPage: page,
+            totalPages: Int(ceil(Double(filteredManga.count) / Double(itemsPerPage))),
+            hasNextPage: endIndex < filteredManga.count
+        )
+        
+        return Just(mangaPage)
+            .setFailureType(to: Error.self)
+            .eraseToAnyPublisher()
+    }
+    
+    func getAvailableFilters() -> AnyPublisher<MangaFilterOptions, Error> {
+        // Create filter options based on available data
+        let genres = Set(mangaDatabase.flatMap { $0.genres }).sorted()
+        let statuses = MangaStatus.allCases
+        
+        let filterOptions = MangaFilterOptions(
+            genres: genres,
+            status: statuses,
+            languages: mockLanguages,
+            sortOptions: MangaSortOption.allCases
+        )
+        
+        return Just(filterOptions)
+            .setFailureType(to: Error.self)
+            .eraseToAnyPublisher()
+    }
+    
+    func getAvailableSources() -> AnyPublisher<[MangaSource], Error> {
+        return Just(availableSources)
+            .setFailureType(to: Error.self)
+            .eraseToAnyPublisher()
+    }
+    
+    func switchSource(sourceId: String) -> AnyPublisher<Bool, Error> {
+        if let newSource = availableSources.first(where: { $0.id == sourceId }) {
+            currentSource = newSource
+            return Just(true)
+                .setFailureType(to: Error.self)
+                .eraseToAnyPublisher()
+        }
+        
+        return Just(false)
+            .setFailureType(to: Error.self)
+            .eraseToAnyPublisher()
+    }
+    
+    func getCurrentSource() -> AnyPublisher<MangaSource, Error> {
+        return Just(currentSource)
+            .setFailureType(to: Error.self)
+            .eraseToAnyPublisher()
+    }
+}
+
+// Models for filtering and pagination
+struct MangaFilterOptions {
+    let genres: [String]
+    let status: [MangaStatus]
+    let languages: [String]
+    let sortOptions: [MangaSortOption]
+}
+
+struct MangaPage {
+    let manga: [Manga]
+    let currentPage: Int
+    let totalPages: Int
+    let hasNextPage: Bool
+}
+
+enum MangaSortOption: String, CaseIterable {
+    case alphabetical = "Alphabetical"
+    case popularity = "Popularity" 
+    case releaseDate = "Release Date"
+    case latestUpdate = "Latest Update"
+}
+
+struct MangaSource: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let icon: String
+    
+    static func == (lhs: MangaSource, rhs: MangaSource) -> Bool {
+        lhs.id == rhs.id
     }
 }

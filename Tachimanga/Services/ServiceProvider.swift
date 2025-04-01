@@ -4,40 +4,86 @@ class ServiceProvider: ObservableObject {
     static let shared = ServiceProvider()
     
     // Repositories
-    let mangaRepository: MangaRepository
-    let userRepository: UserRepository
+    var mangaRepository: MangaRepository {
+        getCurrentMangaRepository()
+    }
+    
+    // Change from protocol type to concrete implementation type
+    let userRepository: RealUserRepository
     
     // Services
     let apiService: APIService
     let databaseService: DatabaseService
     
+    // Available repositories by source
+    private var mangaDexRepository: MangaDexRepository
+    private var localSourceRepository: LocalSourceRepository
+    
+    // Current selected source ID
+    private var currentSourceId: String = "local" // Default to local source
+    
     private init() {
         // Initialize services
         #if DEBUG
         if ProcessInfo.processInfo.environment["MOCK_SERVICES"] == "1" {
-            // Use mock services for testing
+            // Use mock API service for testing
             apiService = MockAPIService()
-            databaseService = MockDatabaseService()
-            mangaRepository = MockMangaRepository()
         } else {
             // Use real API services for production
             apiService = MangaDexAPIService()
-            databaseService = MockDatabaseService() // We'll still use mock database service
-            mangaRepository = MangaDexRepository(apiService: apiService, databaseService: databaseService)
         }
         #else
         // Production always uses real services
         apiService = MangaDexAPIService()
-        databaseService = MockDatabaseService() // We'll still use mock database service for now
-        mangaRepository = MangaDexRepository(apiService: apiService, databaseService: databaseService)
         #endif
         
-        // Initialize repositories with services
-        userRepository = MockUserRepository()
+        // Initialize database service - use real implementation for all environments
+        databaseService = UserDefaultsDatabaseService()
+        
+        // Initialize repositories
+        mangaDexRepository = MangaDexRepository(apiService: apiService, databaseService: databaseService)
+        localSourceRepository = LocalSourceRepository(databaseService: databaseService)
+        
+        // Initialize user repository with real implementation
+        userRepository = RealUserRepository(databaseService: databaseService)
+        
+        // Load saved source from user preferences
+        loadSavedSource()
+    }
+    
+    // Get current repository based on selected source
+    private func getCurrentMangaRepository() -> MangaRepository {
+        switch currentSourceId {
+        case "mangadex":
+            return mangaDexRepository
+        case "local":
+            return localSourceRepository
+        default:
+            return localSourceRepository // Default to local
+        }
+    }
+    
+    // Switch source
+    func switchSource(sourceId: String) {
+        currentSourceId = sourceId
+        saveSelectedSource(sourceId)
+        objectWillChange.send()
+    }
+    
+    // Save selected source to user preferences
+    private func saveSelectedSource(_ sourceId: String) {
+        UserDefaults.standard.set(sourceId, forKey: "selectedMangaSource")
+    }
+    
+    // Load saved source from user preferences
+    private func loadSavedSource() {
+        if let savedSource = UserDefaults.standard.string(forKey: "selectedMangaSource") {
+            currentSourceId = savedSource
+        }
     }
     
     // For testing and previews
-    static func createMockProvider() -> ServiceProvider {
+    static func createForPreview() -> ServiceProvider {
         let provider = ServiceProvider()
         return provider
     }
